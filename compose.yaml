@@ -1,0 +1,60 @@
+name: crawl4ai-mcp
+
+services:
+  crawl4ai:
+    image: unclecode/crawl4ai:0.9.1@sha256:c9e1b1217fdd04a013864482861db57fbf20d922fa55e3db3eb420ab0411a9af
+    ports:
+      - "127.0.0.1:${CRAWL4AI_PORT:-11235}:11235"
+    environment:
+      CRAWL4AI_API_TOKEN: "${CRAWL4AI_API_TOKEN:?Set CRAWL4AI_API_TOKEN}"
+      XDG_CONFIG_HOME: /tmp/.config
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
+    shm_size: 1gb
+    tmpfs:
+      - /tmp
+      - /var/lib/redis:uid=999,gid=999,mode=0700
+      - /var/lib/crawl4ai/outputs:uid=999,gid=999,mode=0700
+      - /home/appuser/.crawl4ai:uid=999,gid=999,mode=0700
+      - /home/appuser/.cache/url_seeder:uid=999,gid=999,mode=0700
+      - /home/appuser/.cache/ms-playwright/chromium_headless_shell-1228:uid=999,gid=999,mode=0700
+      - /home/appuser/.gunicorn:uid=999,gid=999,mode=0700
+    # 0.9.1 contains full Chromium 1228 but omits Playwright's headless-shell path.
+    command:
+      - bash
+      - -ec
+      - |
+        case "$(uname -m)" in
+          x86_64)
+            mkdir -p /home/appuser/.cache/ms-playwright/chromium_headless_shell-1228/chrome-headless-shell-linux64
+            ln -s ../../chromium-1228/chrome-linux64/chrome /home/appuser/.cache/ms-playwright/chromium_headless_shell-1228/chrome-headless-shell-linux64/chrome-headless-shell
+            ;;
+          aarch64|arm64)
+            mkdir -p /home/appuser/.cache/ms-playwright/chromium_headless_shell-1228/chrome-linux
+            ln -s ../../chromium-1228/chrome-linux/chrome /home/appuser/.cache/ms-playwright/chromium_headless_shell-1228/chrome-linux/headless_shell
+            ;;
+          *)
+            echo "Unsupported architecture: $(uname -m)" >&2
+            exit 1
+            ;;
+        esac
+        exec bash entrypoint.sh
+    deploy:
+      resources:
+        limits:
+          memory: 4g
+          # Compose requires this to match the service-level pids_limit.
+          pids: 512
+        reservations:
+          memory: 1g
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://localhost:11235/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 15s
